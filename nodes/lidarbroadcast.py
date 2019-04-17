@@ -9,23 +9,26 @@ from dynamic_reconfigure.server import Server
 import dynamic_reconfigure.client
 from xaxxon_openlidar.cfg import XaxxonOpenLidarConfig
 
-
+headeroffset = None # set by cfg
+newheaderoffset = None
+masks = [] # set by cfg
+minimum_range = 0.0 # set by cfg
+maximum_range = 40.0 # set by cfg 
 READINTERVAL = 0.0014 # must match firmware TODO: read from device on init
-# SKIPLAST = 6 # must match firmware TODO: read from device on init
-MINIMUMRANGE = 0.5 # 0.5
-MAXMIMURANGE = 40.0 
-RPM = 220 # speed, firmware default 180
+rpm = 180 # rev speed, set by cfg, 250 max
+newrpm = None
+dropscan_degpersec = 0
+
 DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
 debugoutput = True
 VERSION = "1.0"
+
+dropScanTurnRateThreshold = 0.785 # radians, 0 = disabled
 lastodomth = None
 lastodomtime = 0
 turning = False
 turnrate = 0 # radians per second
-headeroffset = None
-newheaderoffset = None
-masks = [] 
-masksConfigInit = False
+
 
 def cleanup():
 	global ser
@@ -37,6 +40,10 @@ def cleanup():
 	
 def odomCallback(data):
 	global turning, turnrate, lastodomth, lastodomtime
+
+	if dropScanTurnRateThreshold == 0:
+		return
+		
 	quaternion = ( data.pose.pose.orientation.x, data.pose.pose.orientation.y,
 	data.pose.pose.orientation.z, data.pose.pose.orientation.w )
 	odomth = tf.transformations.euler_from_quaternion(quaternion)[2] # Z rotation
@@ -54,7 +61,7 @@ def odomCallback(data):
 
 	# print(str(turnrate))
 	
-	if abs(turnrate) > 0.785: # 45 deg per second TODO: roslaunch parameter
+	if abs(turnrate) > dropScanTurnRateThreshold: # 45 deg per second TODO: roslaunch parameter
 		turning = True
 	else:
 		turning = False
@@ -63,16 +70,23 @@ def odomCallback(data):
 	lastodomtime = now
 	
 def dynamicConfigCallback(config, level):
-	global newheaderoffset
+	global newheaderoffset, newrpm, minimum_range, maximum_range, dropScanTurnRateThreshold
 	
-	print(config)
+	if debugoutput:
+		print(config)
 	
-	if not config.header_offset == headeroffset and not headeroffset == None:
+	if not config.header_offset == headeroffset:
 		newheaderoffset = config.header_offset
-		print ("newheaderoffset: "+ str(newheaderoffset))
 		
-	if masksConfigInit:	
-		updateMasks(config.masks)
+	if not config.rpm == rpm:
+		newrpm = config.rpm
+		
+	updateMasks(config.masks)
+	
+	minimum_range = config.minimum_range
+	maximum_range = config.maximum_range
+
+	dropScanTurnRateThreshold = math.radians(config.dropscan_turnrate)
 
 	return config
 	
@@ -92,20 +106,18 @@ def updateHeaderOffset():
 	ser.write(chr(val2))
 	ser.write("\n")
 
-	rospy.sleep(0.1)
-
-def getHeaderOffset():
-	global headeroffset
+# def getHeaderOffset():
+	# global headeroffset
 	
-	ser.write("i\n") # get header offset
-	rospy.sleep(0.1)
-	while ser.inWaiting() > 0:
-		line = ser.readline().strip()
-		print(line)
-		headeroffset = float(line.replace("<","").replace(">",""))*360.0
-		print("headeroffset received from device: "+str(headeroffset))
+	# ser.write("i\n") # get header offset
+	# rospy.sleep(0.1)
+	# while ser.inWaiting() > 0:
+		# line = ser.readline().strip()
+		# print(line)
+		# headeroffset = float(line.replace("<","").replace(">",""))*360.0
+		# print("headeroffset received from device: "+str(headeroffset))
 		
-	client.update_configuration({"header_offset":headeroffset})
+	# client.update_configuration({"header_offset":headeroffset})
 
 def updateMasks(string):
 	global masks
@@ -114,21 +126,28 @@ def updateMasks(string):
 	
 	strmasks = string.split()
 	masks = []
-	i=0
 	for s in strmasks:
-		masks[i]=int(s)
-		i += 1
+		masks.append(int(s))
 		
-def writeMasksToConfig():
-	newconfig = ""
-	for i in masks:
-		newconfig += str(i)+" "
+# def writeMasksToConfig():
+	# newconfig = ""
+	# for i in masks:
+		# newconfig += str(i)+" "
 	
-	print("masks newconfig: "+newconfig)
-	client.update_configuration({"masks":newconfig})
+	# print("masks newconfig: "+newconfig)
+	# client.update_configuration({"masks":newconfig})
 	
-	masksConfigInit = True
-		
+	# masksConfigInit = True
+
+def updateRPM():
+	global rpm, newrpm
+
+	rpm = newrpm
+	newrpm = None
+
+	print("sending rpm to device: "+str(rpm))
+	ser.write("r"+chr(rpm)+"\n")  
+	
 
 # main
 
@@ -140,8 +159,6 @@ rospy.Subscriber("odom", Odometry, odomCallback) # TODO: make optional
 Server(XaxxonOpenLidarConfig, dynamicConfigCallback)
 client = dynamic_reconfigure.client.Client("lidarbroadcast", timeout=30)
 
-writeMasksToConfig()
-
 ser = usbdiscover.usbdiscover("<id::xaxxonopenlidar>")
 
 ser.write("y\n") # get version
@@ -151,9 +168,7 @@ while ser.inWaiting() > 0:
 	line = ser.readline().strip()
 	print(line)
 	
-getHeaderOffset()
-
-ser.write("r"+chr(RPM)+"\n")  # set speed (180 default, 255 max) 
+ser.write("r"+chr(rpm)+"\n")  
 ser.write("d"+chr(DIR)+"\n")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
 ser.write
 ser.write("a\n") # start lidar
@@ -170,6 +185,11 @@ scannum = 0
 
 while not rospy.is_shutdown() and ser.is_open:
 	
+	if not newheaderoffset == None:
+		updateHeaderOffset()
+	if not newrpm == None:
+		updateRPM()
+		
 	# read data and dump into array, checking for header code 0xFF,0xFF,0xFF,0xFF
 	ch = ser.read(1)
 	
@@ -237,7 +257,6 @@ while not rospy.is_shutdown() and ser.is_open:
 	rospycycle = current_time - lastscan
 	# cycle = rospycycle.to_sec()
 	lastscan = current_time	
-
 	
 	rospycount = (len(raw_data)-headercodesize)/2
 	
@@ -268,18 +287,14 @@ while not rospy.is_shutdown() and ser.is_open:
 	scan.header.stamp = current_time - rospy.Duration(cycle) # rospycycle 
 	scan.header.frame_id = 'laser_frame'
 
-	# scan.angle_min = 0.0
-	# scan.angle_max = (cycle - READINTERVAL*SKIPLAST)/cycle * 2 * math.pi
-	# scan.angle_increment = (scan.angle_max-scan.angle_min) / (count-1)  	
-
-
 	scan.angle_min = 0.0
 	# scan.angle_max = (READINTERVAL*(count-1))/cycle * 2 * math.pi
-	rpmcycle = 1.0/(RPM/60.0)
+	rpmcycle = cycle # 1.0/(rpm/60.0) # cycle seems to work better with lagging rotations
 	scan.angle_max = (READINTERVAL*(count-1))/rpmcycle * 2 * math.pi
 	scan.angle_increment = (scan.angle_max-scan.angle_min) / (count-1)  	
 
 	""" distort scan to comp for rotating mobile base """
+	# TODO: not that accurate, maybe good enough for cartographer
 	# if turnrate>0: # radians per second, robot turning CW, spread out scan		
 		# ratio = 1+turnrate/(2*math.pi/cycle)
 		# scan.angle_max *= ratio
@@ -289,14 +304,11 @@ while not rospy.is_shutdown() and ser.is_open:
 		# scan.angle_max *= ratio
 		# scan.angle_increment *= ratio
 
-	# scan.time_increment =  cycle/count
-	# scan.scan_time = cycle # rospycycle.to_sec()
-
 	scan.time_increment =  READINTERVAL
 	scan.scan_time = READINTERVAL * count # cycle # rospycycle.to_sec()
 
-	scan.range_min = MINIMUMRANGE
-	scan.range_max = MAXMIMURANGE
+	scan.range_min = minimum_range
+	scan.range_max = maximum_range
 
 	zeroes = 0
 	scan.ranges=[]
@@ -319,7 +331,7 @@ while not rospy.is_shutdown() and ser.is_open:
 		i += 2
 		
 		
-	""" blank scans when turning """
+	""" if blanking scans when turning """
 	if dropscan: 	
 		for i in range(len(scan.ranges)):
 			scan.ranges[i] = 0
@@ -329,9 +341,6 @@ while not rospy.is_shutdown() and ser.is_open:
 	scan_pub.publish(scan)
 	
 	del raw_data[:] 
-	
-	if not newheaderoffset == None:
-		updateHeaderOffset()
 
 	# if scannum % 10 == 0:
 		# msg = "scan #: "+str(scannum)
