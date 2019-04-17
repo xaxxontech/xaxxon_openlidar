@@ -1,0 +1,5 @@
+<launch>
+
+	<node pkg="xaxxon_openlidar" type="lidarbroadcast.py" name="lidarbroadcast" required="true" output="screen"/> 
+	 
+</launch>
