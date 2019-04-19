@@ -10,14 +10,13 @@ import dynamic_reconfigure.client
 from xaxxon_openlidar.cfg import XaxxonOpenLidarConfig
 
 headeroffset = None # set by cfg
-newheaderoffset = None
 masks = [] # set by cfg
 minimum_range = 0.0 # set by cfg
 maximum_range = 40.0 # set by cfg 
 READINTERVAL = 0.0014 # must match firmware TODO: read from device on init
 rpm = 180 # rev speed, set by cfg, 250 max
-newrpm = None
 dropscan_degpersec = 0
+parkoffset = 0 # used only by device firmware, set by cfg
 
 DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
 debugoutput = True
@@ -70,35 +69,37 @@ def odomCallback(data):
 	lastodomtime = now
 	
 def dynamicConfigCallback(config, level):
-	global newheaderoffset, newrpm, minimum_range, maximum_range, dropScanTurnRateThreshold
+	global newheaderoffset, minimum_range, maximum_range, dropScanTurnRateThreshold
 	
 	if debugoutput:
 		print(config)
-	
-	if not config.header_offset == headeroffset:
-		newheaderoffset = config.header_offset
-		
-	if not config.rpm == rpm:
-		newrpm = config.rpm
 		
 	updateMasks(config.masks)
 	
+	updateHeaderOffset(config.forward_offset)
+		
+	updateRPM(config.rpm)
+		
 	minimum_range = config.minimum_range
 	maximum_range = config.maximum_range
 
 	dropScanTurnRateThreshold = math.radians(config.dropscan_turnrate)
+	
+	updateParkOffset(config.park_offset)
 
 	return config
 	
-def updateHeaderOffset():
-	global headeroffset, newheaderoffset
-
-	headeroffset = newheaderoffset
-	newheaderoffset = None
+def updateHeaderOffset(offset):
+	global headeroffset
 	
-	n = int(headeroffset*10)
+	if offset == headeroffset:
+		return
+	
+	headeroffset = offset
+	
+	n = int(offset*10)
 
-	print("sending newheaderoffset to device: "+str(headeroffset))
+	print("sending new headeroffset to device: "+str(n))
 	val1 = n & 0xFF
 	val2 = (n >>8) & 0xFF
 	ser.write("k")
@@ -123,11 +124,19 @@ def updateMasks(string):
 	global masks
 	
 	print("updating masks: "+string)
-	
-	strmasks = string.split()
+
 	masks = []
-	for s in strmasks:
-		masks.append(int(s))
+	
+	try:
+		strmasks = string.split()
+		for s in strmasks:
+			masks.append(int(s))
+	except:
+		print("error parsing masks")
+		
+	if not (len(masks) % 2) == 0:
+		print("uneven number of masks")
+		masks=[]
 		
 # def writeMasksToConfig():
 	# newconfig = ""
@@ -139,14 +148,31 @@ def updateMasks(string):
 	
 	# masksConfigInit = True
 
-def updateRPM():
-	global rpm, newrpm
+def updateRPM(speed):
+	global rpm
 
-	rpm = newrpm
-	newrpm = None
-
+	if rpm == speed:
+		return
+		
+	rpm = speed
 	print("sending rpm to device: "+str(rpm))
 	ser.write("r"+chr(rpm)+"\n")  
+	
+def updateParkOffset(offset):
+	global parkoffset
+
+	if parkoffset == offset:
+		return
+		
+	parkoffset = offset
+	n = int(parkoffset*10)
+	print("sending parkoffset to device: "+str(parkoffset))
+	val1 = n & 0xFF
+	val2 = (n >>8) & 0xFF
+	ser.write("q")
+	ser.write(chr(val1))
+	ser.write(chr(val2))
+	ser.write("\n")
 	
 
 # main
@@ -156,10 +182,13 @@ rospy.on_shutdown(cleanup)
 rospy.loginfo("xaxxon_openlidar.py version: "+VERSION)
 scan_pub = rospy.Publisher(rospy.get_param('~scan_topic', 'scan'), LaserScan, queue_size=3)
 rospy.Subscriber("odom", Odometry, odomCallback) # TODO: make optional
+
+ser = usbdiscover.usbdiscover("<id::xaxxonopenlidar>")
+
+# must go after usbdiscover or unrecognized ser object error
 Server(XaxxonOpenLidarConfig, dynamicConfigCallback)
 client = dynamic_reconfigure.client.Client("lidarbroadcast", timeout=30)
 
-ser = usbdiscover.usbdiscover("<id::xaxxonopenlidar>")
 
 ser.write("y\n") # get version
 line = ""
@@ -184,12 +213,7 @@ dropscan = False
 scannum = 0
 
 while not rospy.is_shutdown() and ser.is_open:
-	
-	if not newheaderoffset == None:
-		updateHeaderOffset()
-	if not newrpm == None:
-		updateRPM()
-		
+
 	# read data and dump into array, checking for header code 0xFF,0xFF,0xFF,0xFF
 	ch = ser.read(1)
 	
@@ -264,7 +288,7 @@ while not rospy.is_shutdown() and ser.is_open:
 	if debugoutput:
 		if not count == 0:
 			print "cycle: "+str(cycle)
-			## print "rospycycle: "+str(rospycycle.to_sec())
+			print "rospycycle: "+str(rospycycle.to_sec())
 			print "count: "+str(count)
 			# print "lastDistanceOffset: "+str(lastDistanceOffset)
 			## print "firstDistanceOffset: "+str(firstDistanceOffset)
@@ -312,16 +336,18 @@ while not rospy.is_shutdown() and ser.is_open:
 
 	zeroes = 0
 	scan.ranges=[]
+	# temp=[]
 	for x in range(len(raw_data)-(count*2)-headercodesize, len(raw_data)-headercodesize, 2):
 		low = ord(raw_data[x])
 		high = ord(raw_data[x+1])
 		value = ((high<<8)|low) / 100.0
 		scan.ranges.append(value)
+		# temp.append(value)
 
-	""" comp rpm photo sensor offset """
-	# tilt = 283 # degrees  (was 280)
-	# split = int(tilt/360.0*count)
-	# scan.ranges = temp[split:]+temp[0:split]
+	""" rotate if hideHeaderInMask """
+	# if hideHeaderInMask: 
+		# split = int((360-hideHeaderAngle)/360.0*count)
+		# scan.ranges = temp[split:]+temp[0:split]
 
 	""" blank frame masks W/RHR+ degrees start, stop """
 	i = 0
@@ -329,7 +355,6 @@ while not rospy.is_shutdown() and ser.is_open:
 		for x in range(int(count*((masks[i])/360.0)), int(count*((masks[i+1])/360.0)) ):
 			scan.ranges[x] = 0
 		i += 2
-		
 		
 	""" if blanking scans when turning """
 	if dropscan: 	
