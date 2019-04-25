@@ -13,7 +13,7 @@ headeroffset = None # set by cfg
 masks = [] # set by cfg
 minimum_range = 0.0 # set by cfg
 maximum_range = 40.0 # set by cfg 
-READINTERVAL = 0.0014 # must match firmware TODO: read from device on init
+readInterval = 0.0014 # must match firmware TODO: read from device on init
 rpm = 180 # rev speed, set by cfg, 250 max
 dropscan_degpersec = 0
 parkoffset = 0 # used only by device firmware, set by cfg
@@ -86,6 +86,8 @@ def dynamicConfigCallback(config, level):
 	dropScanTurnRateThreshold = math.radians(config.dropscan_turnrate)
 	
 	updateParkOffset(config.park_offset)
+	
+	updateReadInterval(config.read_frequency)
 
 	return config
 	
@@ -174,6 +176,22 @@ def updateParkOffset(offset):
 	ser.write(chr(val2))
 	ser.write("\n")
 	
+def updateReadInterval(frequency):
+	global readInterval
+	
+	interval = int(1.0/frequency*1000000)
+	if interval/1000000.0 == readInterval:
+		return
+		
+	readInterval = interval/1000000.0	
+	print("readInterval"+str(readInterval))
+	print("sending read interval to device: "+str(interval))
+	val1 = interval & 0xFF
+	val2 = (interval >>8) & 0xFF
+	ser.write("t")
+	ser.write(chr(val1))
+	ser.write(chr(val2))
+	ser.write("\n")
 
 # main
 
@@ -312,9 +330,9 @@ while not rospy.is_shutdown() and ser.is_open:
 	scan.header.frame_id = 'laser_frame'
 
 	scan.angle_min = 0.0
-	# scan.angle_max = (READINTERVAL*(count-1))/cycle * 2 * math.pi
+	# scan.angle_max = (readInterval*(count-1))/cycle * 2 * math.pi
 	rpmcycle = cycle # 1.0/(rpm/60.0) # cycle seems to work better with lagging rotations
-	scan.angle_max = (READINTERVAL*(count-1))/rpmcycle * 2 * math.pi
+	scan.angle_max = (readInterval*(count-1))/rpmcycle * 2 * math.pi
 	scan.angle_increment = (scan.angle_max-scan.angle_min) / (count-1)  	
 
 	""" distort scan to comp for rotating mobile base """
@@ -328,8 +346,8 @@ while not rospy.is_shutdown() and ser.is_open:
 		# scan.angle_max *= ratio
 		# scan.angle_increment *= ratio
 
-	scan.time_increment =  READINTERVAL
-	scan.scan_time = READINTERVAL * count # cycle # rospycycle.to_sec()
+	scan.time_increment =  readInterval
+	scan.scan_time = readInterval * count # cycle # rospycycle.to_sec()
 
 	scan.range_min = minimum_range
 	scan.range_max = maximum_range
