@@ -6,6 +6,9 @@ Open Hardware Rotational Laser Scanner
 Project web site:
 [ xaxxon.com/xaxxon/openlidar ](http://www.xaxxon.com/xaxxon/openlidar)
 
+Firmware:
+[ github.com/xaxxontech/xaxxon_openlidar_pcb ](https://github.com/xaxxontech/xaxxon_openlidar_pcb)
+
 Documentation:
 [ xaxxon.com/documentation/view/xaxxon-openlidar ](http://www.xaxxon.com/documentation/view/xaxxon-openlidar)
 
