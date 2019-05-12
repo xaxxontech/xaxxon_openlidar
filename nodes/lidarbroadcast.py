@@ -28,7 +28,6 @@ lastodomtime = 0
 turning = False
 turnrate = 0 # radians per second
 
-
 def cleanup():
 	global ser
 	ser.write("f\n") # stop lidar
@@ -48,9 +47,7 @@ def odomCallback(data):
 	odomth = tf.transformations.euler_from_quaternion(quaternion)[2] # Z rotation
 
 	now = rospy.get_time()
-	
-	# print("odomth"+str(odomth))
-	
+
 	if lastodomtime == 0:
 		lastodomth = odomth
 		lastodomtime = now
@@ -58,9 +55,7 @@ def odomCallback(data):
 	
 	turnrate = (odomth-lastodomth)/(now-lastodomtime) # radians per second
 
-	# print(str(turnrate))
-	
-	if abs(turnrate) > dropScanTurnRateThreshold: # 45 deg per second TODO: roslaunch parameter
+	if abs(turnrate) > dropScanTurnRateThreshold:
 		turning = True
 	else:
 		turning = False
@@ -69,7 +64,8 @@ def odomCallback(data):
 	lastodomtime = now
 	
 def dynamicConfigCallback(config, level):
-	global newheaderoffset, minimum_range, maximum_range, dropScanTurnRateThreshold
+	global newheaderoffset, minimum_range, maximum_range
+	global dropScanTurnRateThreshold, distortscan
 	
 	if debugoutput:
 		print(config)
@@ -139,16 +135,6 @@ def updateMasks(string):
 	if not (len(masks) % 2) == 0:
 		print("uneven number of masks")
 		masks=[]
-		
-# def writeMasksToConfig():
-	# newconfig = ""
-	# for i in masks:
-		# newconfig += str(i)+" "
-	
-	# print("masks newconfig: "+newconfig)
-	# client.update_configuration({"masks":newconfig})
-	
-	# masksConfigInit = True
 
 def updateRPM(speed):
 	global rpm
@@ -199,7 +185,7 @@ rospy.init_node('lidarbroadcast', anonymous=False)
 rospy.on_shutdown(cleanup)
 rospy.loginfo("xaxxon_openlidar.py version: "+VERSION)
 scan_pub = rospy.Publisher(rospy.get_param('~scan_topic', 'scan'), LaserScan, queue_size=3)
-rospy.Subscriber("odom", Odometry, odomCallback) # TODO: make optional
+rospy.Subscriber("odom", Odometry, odomCallback) # TODO: make optional?
 
 ser = usbdiscover.usbdiscover("<id::xaxxonopenlidar>")
 
@@ -233,8 +219,9 @@ scannum = 0
 while not rospy.is_shutdown() and ser.is_open:
 
 	# read data and dump into array, checking for header code 0xFF,0xFF,0xFF,0xFF
-	ch = ser.read(1)
+	ch = ser.read(1)  
 	
+	# if timed out (5 seconds, defined in usbdiscover.py)
 	if len(ch) == 0:
 		rospy.logerr("no response from xaxxonlidar device")
 		break
@@ -268,11 +255,6 @@ while not rospy.is_shutdown() and ser.is_open:
 	low = ord(ser.read(1))
 	high = ord(ser.read(1))
 	count = (high<<8)|low
-
-	# """ read first distance offset """
-	# low = ord(ser.read(1))
-	# high = ord(ser.read(1))
-	# firstDistanceOffset = ((high<<8)|low)/1000000.0
 	
 	""" read cycle """
 	c1 = ord(ser.read(1))
@@ -280,19 +262,6 @@ while not rospy.is_shutdown() and ser.is_open:
 	c3 = ord(ser.read(1))
 	c4 = ord(ser.read(1))
 	cycle = ((c4<<24)|(c3<<16)|(c2<<8)|c1)/1000000.0
-	
-	# """ read last distance offset """
-	# low = ord(ser.read(1))
-	# high = ord(ser.read(1))
-	# lastDistanceOffset = ((high<<8)|low)/1000000.0
-	
-	# """ device time """
-	# if current_time == 0:
-		# current_time = rospy.Time.now() # - rospy.Duration(0.0) #0.015
-	# else:
-		# current_time += rospy.Duration(cycle)
-	# rospycycle = current_time - lastscan
-	# lastscan = current_time
 
 	""" host time """
 	current_time = rospy.Time.now() # - rospy.Duration(0.0) #0.015
@@ -308,17 +277,13 @@ while not rospy.is_shutdown() and ser.is_open:
 			print "cycle: "+str(cycle)
 			print "rospycycle: "+str(rospycycle.to_sec())
 			print "count: "+str(count)
-			# print "lastDistanceOffset: "+str(lastDistanceOffset)
-			## print "firstDistanceOffset: "+str(firstDistanceOffset)
 			print "scannum: "+str(scannum)
-			# print "interval: "+str(cycle/count)
-			## print "raw_data length: "+str((len(raw_data)-headercodesize)/2)
 		if not rospycount == count:
 			print "*** COUNT/DATA MISMATCH *** "+ str( rospycount-count )
 		print " "
 	
-		# if scannum > 10:
-			# debugoutput = False
+		if scannum > 10:
+			debugoutput = False
 	
 	scannum += 1	
 	if scannum <= 3: # drop 1st few scans while lidar spins up
@@ -330,18 +295,17 @@ while not rospy.is_shutdown() and ser.is_open:
 	scan.header.frame_id = 'laser_frame'
 
 	scan.angle_min = 0.0
-	# scan.angle_max = (readInterval*(count-1))/cycle * 2 * math.pi
-	rpmcycle = cycle # 1.0/(rpm/60.0) # cycle seems to work better with lagging rotations
+	rpmcycle = cycle
 	scan.angle_max = (readInterval*(count-1))/rpmcycle * 2 * math.pi
 	scan.angle_increment = (scan.angle_max-scan.angle_min) / (count-1)  	
 
 	""" distort scan to comp for rotating mobile base """
-	# TODO: not that accurate, maybe good enough for cartographer
-	# if turnrate>0: # radians per second, robot turning CW, spread out scan		
+	# TODO: not that accurate, maybe good enough for cartographer?
+	# if turnrate>0 and distortscan: # radians per second, robot turning CW, spread out scan		
 		# ratio = 1+turnrate/(2*math.pi/cycle)
 		# scan.angle_max *= ratio
 		# scan.angle_increment *= ratio
-	# elif turnrate<0: # robot turning CCW, compress scan
+	# elif turnrate<0 and distortscan: # robot turning CCW, compress scan
 		# ratio = 1-turnrate/(2*math.pi/cycle)
 		# scan.angle_max *= ratio
 		# scan.angle_increment *= ratio
