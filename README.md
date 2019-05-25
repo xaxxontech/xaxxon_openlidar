@@ -12,4 +12,7 @@ Firmware:
 Documentation:
 [ xaxxon.com/documentation/view/xaxxon-openlidar ](http://www.xaxxon.com/documentation/view/xaxxon-openlidar)
 
+ROS package: 
+[ wiki.ros.org/xaxxon_openlidar ](http://wiki.ros.org/xaxxon_openlidar)
+
 ROS-Indigo/Jade/Kinetic/Lunar/Melodic
