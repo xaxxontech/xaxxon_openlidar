@@ -22,11 +22,12 @@ DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
 debugoutput = True
 VERSION = "1.0"
 
-dropScanTurnRateThreshold = 0.785 # radians, 0 = disabled
+dropScanTurnRateThreshold = 0 # 0.785 radians, 0 = disabled
 lastodomth = None
 lastodomtime = 0
 turning = False
 turnrate = 0 # radians per second
+
 
 def cleanup():
 	global ser
@@ -203,7 +204,6 @@ while ser.inWaiting() > 0:
 	
 ser.write("r"+chr(rpm)+"\n")  
 ser.write("d"+chr(DIR)+"\n")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
-ser.write
 ser.write("a\n") # start lidar
 
 # clear buffer
@@ -298,17 +298,6 @@ while not rospy.is_shutdown() and ser.is_open:
 	rpmcycle = cycle
 	scan.angle_max = (readInterval*(count-1))/rpmcycle * 2 * math.pi
 	scan.angle_increment = (scan.angle_max-scan.angle_min) / (count-1)  	
-
-	""" distort scan to comp for rotating mobile base """
-	# TODO: not that accurate, maybe good enough for cartographer?
-	# if turnrate>0 and distortscan: # radians per second, robot turning CW, spread out scan		
-		# ratio = 1+turnrate/(2*math.pi/cycle)
-		# scan.angle_max *= ratio
-		# scan.angle_increment *= ratio
-	# elif turnrate<0 and distortscan: # robot turning CCW, compress scan
-		# ratio = 1-turnrate/(2*math.pi/cycle)
-		# scan.angle_max *= ratio
-		# scan.angle_increment *= ratio
 
 	scan.time_increment =  readInterval
 	scan.scan_time = readInterval * count # cycle # rospycycle.to_sec()
