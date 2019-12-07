@@ -20,13 +20,16 @@ parkoffset = 0 # used only by device firmware, set by cfg
 
 DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
 DEBUGOUTPUT = False
-VERSION = "1.1"
 
-dropScanTurnRateThreshold = 0 # 0.785 radians, 0 = disabled
+dropScanTurnRateThreshold = 0 # 0 = disabled
 lastodomth = None
 lastodomtime = 0
 turning = False
 turnrate = 0 # radians per second
+
+forward_offset = 0
+park_offset = 0
+read_frequency = 0
 
 
 def cleanup():
@@ -43,7 +46,7 @@ def cleanup():
 			rospy.loginfo(line)
 		
 	ser.close()
-	rospy.sleep(3)
+	#  rospy.sleep(3)
 	rospy.loginfo("SCAN: lidar disabled, shutdown");
 	
 	
@@ -78,24 +81,30 @@ def odomCallback(data):
 def dynamicConfigCallback(config, level):
 	global newheaderoffset, minimum_range, maximum_range
 	global dropScanTurnRateThreshold, distortscan
+	global forward_offset, rpm, park_offset, read_frequency
 	
-	if DEBUGOUTPUT:
-		print(config)
+	#  if DEBUGOUTPUT:
+		#  print(config)
 		
 	updateMasks(config.masks)
 	
-	updateHeaderOffset(config.forward_offset)
+	#  updateHeaderOffset(config.forward_offset)
 		
-	updateRPM(config.rpm)
+	#  updateRPM(config.rpm)
 		
 	minimum_range = config.minimum_range
 	maximum_range = config.maximum_range
 
 	dropScanTurnRateThreshold = math.radians(config.dropscan_turnrate)
 	
-	updateParkOffset(config.park_offset)
+	#  updateParkOffset(config.park_offset)
 	
-	updateReadInterval(config.read_frequency)
+	#  updateReadInterval(config.read_frequency)
+	
+	forward_offset = config.forward_offset
+	rpm = config.rpm
+	park_offset = config.park_offset
+	read_frequency = config.read_frequency
 
 	return config
 	
@@ -110,7 +119,7 @@ def updateHeaderOffset(offset):
 	
 	n = int(offset*10)
 
-	print("sending new headeroffset to device: "+str(n))
+	#  print("sending new headeroffset to device: "+str(n))
 	val1 = n & 0xFF
 	val2 = (n >>8) & 0xFF
 	ser.write("k")
@@ -135,7 +144,7 @@ def updateHeaderOffset(offset):
 def updateMasks(string):
 	global masks
 	
-	print("updating masks: "+string)
+	#  print("updating masks: "+string)
 
 	masks = []
 	
@@ -144,10 +153,10 @@ def updateMasks(string):
 		for s in strmasks:
 			masks.append(int(s))
 	except:
-		print("error parsing masks")
+		rospy.logerr("error parsing masks")
 		
 	if not (len(masks) % 2) == 0:
-		print("uneven number of masks")
+		rospy.logerr("uneven number of masks")
 		masks=[]
 
 
@@ -158,7 +167,7 @@ def updateRPM(speed):
 		return
 		
 	rpm = speed
-	print("sending rpm to device: "+str(rpm))
+	#  print("sending rpm to device: "+str(rpm))
 	ser.write("r"+chr(rpm)+"\n")  
 	
 	
@@ -170,7 +179,7 @@ def updateParkOffset(offset):
 		
 	parkoffset = offset
 	n = int(parkoffset*10)
-	print("sending parkoffset to device: "+str(parkoffset))
+	#  print("sending parkoffset to device: "+str(parkoffset))
 	val1 = n & 0xFF
 	val2 = (n >>8) & 0xFF
 	ser.write("q")
@@ -187,7 +196,7 @@ def updateReadInterval(frequency):
 		return
 		
 	readInterval = interval/1000000.0	
-	print("sending read interval to device: "+str(interval))
+	#  print("sending read interval to device: "+str(interval))
 	val1 = interval & 0xFF
 	val2 = (interval >>8) & 0xFF
 	ser.write("t")
@@ -202,7 +211,8 @@ def readlidar(ser):
 	rospy.sleep(0.1)
 	while ser.inWaiting() > 0:
 		line = ser.readline().strip()
-		print(line)
+		line = "firmware: "+line
+		rospy.loginfo(line)
 		
 	ser.write("r"+chr(rpm)+"\n")  
 	ser.write("d"+chr(DIR)+"\n")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
@@ -218,11 +228,15 @@ def readlidar(ser):
 	dropscan = False
 	scannum = 0
 	lastcount = 0
-
+	consecutivescandropped = 0
+	
 	while not rospy.is_shutdown() and ser.is_open:
 
 		# read data and dump into array, checking for header code 0xFF,0xFF,0xFF,0xFF
-		ch = ser.read(1)  
+		try:
+			ch = ser.read(1)  
+		except:
+			pass
 		
 		# if timed out after TIMEOUT seconds, defined in usbdiscover.py)
 		if len(ch) == 0:
@@ -274,6 +288,8 @@ def readlidar(ser):
 		
 		rospycount = (len(raw_data)-headercodesize)/2
 
+		scannum += 1	
+
 
 		# debug info
 		if scannum % 10 == 0 and DEBUGOUTPUT:
@@ -284,21 +300,31 @@ def readlidar(ser):
 			msg = "SCAN "+str(scannum)+": count/data mismatch: "+ str( rospycount-count )
 			rospy.logerr(msg)
 
-		if count<5 and scannum > 0 and DEBUGOUTPUT:  
-			msg = "SCAN "+str(scannum)+": low data count: "+str(count)+", cycle: "+str(cycle)
-			msg += ", scan dropped"
-			rospy.logerr(msg)
-			del raw_data[:]
-			continue
 		
 		if abs(count - lastcount) > 2 and scannum > 3 and DEBUGOUTPUT:
 			msg = "SCAN "+str(scannum)+": count change from: "+ str(lastcount)+", to: "+str(count)
 			rospy.logerr(msg)
+			
+		if count<5: #  or scannum > 100: 
+			if DEBUGOUTPUT:  
+				msg = "SCAN "+str(scannum)+": low data count: "+str(count)+", cycle: "+str(cycle)
+				msg += ", scan dropped"
+				rospy.logerr(msg)
+			del raw_data[:]
+			consecutivescandropped += 1
+			if consecutivescandropped > 3:
+				rospy.logerr("resetting device")
+				cleanup()
+				break  # TODO: experimental
+			
+			continue
+		else:
+			consecutivescandropped = 0
+
 		
+
 		lastcount = count
 		
-		
-		scannum += 1	
 		if scannum <= 3: # drop 1st few scans while lidar spins up
 			del raw_data[:]
 			continue
@@ -357,15 +383,24 @@ def readlidar(ser):
 
 rospy.init_node('lidarbroadcast', anonymous=False)
 rospy.on_shutdown(cleanup)
-rospy.loginfo("xaxxon_openlidar.py version: "+VERSION)
 scan_pub = rospy.Publisher(rospy.get_param('~scan_topic', 'scan'), LaserScan, queue_size=3)
 rospy.Subscriber("odom", Odometry, odomCallback) # TODO: make optional?
 
-ser = usbdiscover.usbdiscover("<id::xaxxonopenlidar>")
-
-# must go after usbdiscover or unrecognized ser object error
 Server(XaxxonOpenLidarConfig, dynamicConfigCallback)
 client = dynamic_reconfigure.client.Client("lidarbroadcast", timeout=30)
+device = usbdiscover
 
-readlidar(ser)
+while True:
+	ser = device.usbdiscover("<id::xaxxonopenlidar>")
 
+	updateHeaderOffset(forward_offset)
+	updateRPM(rpm)
+	updateParkOffset(park_offset)
+	updateReadInterval(read_frequency)
+
+	readlidar(ser)
+	
+	if rospy.is_shutdown():
+		break
+	else:
+		device.removelockfile()
