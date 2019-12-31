@@ -17,9 +17,10 @@ readInterval = 0.0014 # must match firmware TODO: read from device on init
 rpm = 180 # rev speed, set by cfg, 250 max
 dropscan_degpersec = 0
 parkoffset = 0 # used only by device firmware, set by cfg
+rotateforwardoffset = 0
 
 DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
-DEBUGOUTPUT = False
+DEBUGOUTPUT = True
 
 dropScanTurnRateThreshold = 0 # 0 = disabled
 lastodomth = None
@@ -27,9 +28,11 @@ lastodomtime = 0
 turning = False
 turnrate = 0 # radians per second
 
-forward_offset = 0
-park_offset = 0
+forward_offset = headeroffset
+park_offset = parkoffset
 read_frequency = 0
+rotate_forward_offset = rotateforwardoffset
+rpm_ = rpm
 
 
 def cleanup():
@@ -81,45 +84,39 @@ def odomCallback(data):
 def dynamicConfigCallback(config, level):
 	global newheaderoffset, minimum_range, maximum_range
 	global dropScanTurnRateThreshold, distortscan
-	global forward_offset, rpm, park_offset, read_frequency
+	global forward_offset, rpm_, park_offset, read_frequency, rotate_forward_offset
 	
 	#  if DEBUGOUTPUT:
 		#  print(config)
 		
 	updateMasks(config.masks)
 	
-	#  updateHeaderOffset(config.forward_offset)
-		
-	#  updateRPM(config.rpm)
-		
 	minimum_range = config.minimum_range
 	maximum_range = config.maximum_range
 
 	dropScanTurnRateThreshold = math.radians(config.dropscan_turnrate)
 	
-	#  updateParkOffset(config.park_offset)
-	
-	#  updateReadInterval(config.read_frequency)
-	
 	forward_offset = config.forward_offset
-	rpm = config.rpm
+	rpm_ = config.rpm
 	park_offset = config.park_offset
 	read_frequency = config.read_frequency
+	rotate_forward_offset = config.rotate_forward_offset
 
 	return config
 	
 	
-def updateHeaderOffset(offset):
+def updateHeaderOffset():
 	global headeroffset
 	
-	if offset == headeroffset:
+	if headeroffset == forward_offset:
 		return
 	
-	headeroffset = offset
+	headeroffset = forward_offset
 	
-	n = int(offset*10)
+	n = int(headeroffset*10)
 
-	#  print("sending new headeroffset to device: "+str(n))
+	if DEBUGOUTPUT:
+		print("sending new headeroffset to device: "+str(n))
 	val1 = n & 0xFF
 	val2 = (n >>8) & 0xFF
 	ser.write("k")
@@ -144,42 +141,51 @@ def updateHeaderOffset(offset):
 def updateMasks(string):
 	global masks
 	
-	#  print("updating masks: "+string)
+	if DEBUGOUTPUT:
+		print("updating masks: "+string)
 
 	masks = []
 	
 	try:
 		strmasks = string.split()
 		for s in strmasks:
-			masks.append(int(s))
+			masks.append(float(s))
 	except:
 		rospy.logerr("error parsing masks")
 		
 	if not (len(masks) % 2) == 0:
 		rospy.logerr("uneven number of masks")
 		masks=[]
+		
+	updateRotateForwardOffset()
 
 
-def updateRPM(speed):
+def updateRPM():
 	global rpm
 
-	if rpm == speed:
+	if rpm == rpm_:
 		return
 		
-	rpm = speed
-	#  print("sending rpm to device: "+str(rpm))
+	rpm = rpm_
+	
+	if DEBUGOUTPUT:
+		print("sending rpm to device: "+str(rpm))
+		
 	ser.write("r"+chr(rpm)+"\n")  
 	
 	
-def updateParkOffset(offset):
+def updateParkOffset():
 	global parkoffset
 
-	if parkoffset == offset:
+	if parkoffset == park_offset:
 		return
 		
-	parkoffset = offset
+	parkoffset = park_offset
 	n = int(parkoffset*10)
-	#  print("sending parkoffset to device: "+str(parkoffset))
+	
+	if DEBUGOUTPUT:
+		print("sending parkoffset to device: "+str(parkoffset))
+		
 	val1 = n & 0xFF
 	val2 = (n >>8) & 0xFF
 	ser.write("q")
@@ -188,22 +194,65 @@ def updateParkOffset(offset):
 	ser.write("\n")
 	
 	
-def updateReadInterval(frequency):
+def updateReadInterval():
 	global readInterval
 	
-	interval = int(1.0/frequency*1000000)
+	interval = int(1.0/read_frequency*1000000)
 	if interval/1000000.0 == readInterval:
 		return
 		
 	readInterval = interval/1000000.0	
-	#  print("sending read interval to device: "+str(interval))
+	
+	if DEBUGOUTPUT:
+		print("sending read interval to device: "+str(interval))
+	
 	val1 = interval & 0xFF
 	val2 = (interval >>8) & 0xFF
 	ser.write("t")
 	ser.write(chr(val1))
 	ser.write(chr(val2))
 	ser.write("\n")
+
+
+def updateRotateForwardOffset():
+	global rotateforwardoffset, masks, headeroffset, forward_offset
 	
+	if rotateforwardoffset == rotate_forward_offset:
+		return
+
+	if DEBUGOUTPUT:
+		print("setting rotate_forward_offset: "+str(rotate_forward_offset))
+		
+	i = 0	
+	while i < len(masks):
+		# un-apply old rotate_forward_offset
+		masks[i] += rotateforwardoffset 
+		masks[i+1] += rotateforwardoffset 
+		if masks[i] >= 360 or masks[i+1] >=360:
+			masks[i] -=360
+			masks[i+1] -= 360
+		
+		# apply new rotate_forward_offset
+		masks[i] -= rotate_forward_offset  
+		masks[i+1] -= rotate_forward_offset
+		if masks[i] < 0 or masks[i+1] < 0:
+			masks[i] += 360
+			masks[i+1] += 360
+		
+		i += 2
+		
+	# un-apply old rotate_forward_offset
+	forward_offset -= rotateforwardoffset
+	if forward_offset < 0:
+		forward_offset += 360
+		
+	# apply new rotate_forward_offset
+	forward_offset += rotate_forward_offset
+	if forward_offset >= 360:
+		forward_offset -= 360 
+	
+	rotateforwardoffset = rotate_forward_offset
+
 	
 def readlidar(ser):
 	
@@ -346,18 +395,11 @@ def readlidar(ser):
 
 		zeroes = 0
 		scan.ranges=[]
-		# temp=[]
 		for x in range(len(raw_data)-(count*2)-headercodesize, len(raw_data)-headercodesize, 2):
 			low = ord(raw_data[x])
 			high = ord(raw_data[x+1])
 			value = ((high<<8)|low) / 100.0
 			scan.ranges.append(value)
-			# temp.append(value)
-
-		""" rotate if hideHeaderInMask """
-		# if hideHeaderInMask: 
-			# split = int((360-hideHeaderAngle)/360.0*count)
-			# scan.ranges = temp[split:]+temp[0:split]
 
 		""" blank frame masks W/RHR+ degrees start, stop """
 		i = 0
@@ -393,10 +435,11 @@ device = usbdiscover
 while True:
 	ser = device.usbdiscover("<id::xaxxonopenlidar>")
 
-	updateHeaderOffset(forward_offset)
-	updateRPM(rpm)
-	updateParkOffset(park_offset)
-	updateReadInterval(read_frequency)
+	updateRotateForwardOffset() # needs to be 1st
+	updateHeaderOffset()
+	updateRPM()
+	updateParkOffset()
+	updateReadInterval()
 
 	readlidar(ser)
 	
