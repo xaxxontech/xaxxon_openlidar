@@ -30,7 +30,7 @@ def checkBoardId(idstring, ser):
 	return True
 	
 	
-def usbdiscover(idstring):
+def usbdiscover(idstring, TIMEOUT):
 	global lockfilepath, portnum
 
 	while portnum <= 6:
@@ -56,7 +56,7 @@ def usbdiscover(idstring):
 		open(lockfilepath, 'w') # creates lockfile
 		
 		try:
-			ser = serial.Serial(port, 115200, timeout=5)
+			ser = serial.Serial(port, 115200, timeout=TIMEOUT)
 		except serial.SerialException: 
 			print("port exception: "+port)
 			os.remove(lockfilepath)

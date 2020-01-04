@@ -18,6 +18,9 @@ rpm = 180 # rev speed, set by cfg, 250 max
 dropscan_degpersec = 0
 parkoffset = 0 # used only by device firmware, set by cfg
 rotateforwardoffset = 0
+enable = True
+ser = None
+lidarrunning = False
 
 DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
 DEBUGOUTPUT = True
@@ -36,8 +39,10 @@ rpm_ = rpm
 
 
 def cleanup():
-	global ser
+	global ser, lidarrunning
+	
 	ser.write("f\n") # stop lidar
+	lidarrunning = False
 	
 	if DEBUGOUTPUT:
 		rospy.sleep(0.5)
@@ -49,7 +54,7 @@ def cleanup():
 			rospy.loginfo(line)
 		
 	ser.close()
-	#  rospy.sleep(3)
+	ser = None
 	rospy.loginfo("SCAN: lidar disabled, shutdown");
 	
 	
@@ -83,8 +88,9 @@ def odomCallback(data):
 	
 def dynamicConfigCallback(config, level):
 	global newheaderoffset, minimum_range, maximum_range
-	global dropScanTurnRateThreshold, distortscan
+	global dropScanTurnRateThreshold
 	global forward_offset, rpm_, park_offset, read_frequency, rotate_forward_offset
+	global enable
 	
 	#  if DEBUGOUTPUT:
 		#  print(config)
@@ -101,6 +107,14 @@ def dynamicConfigCallback(config, level):
 	park_offset = config.park_offset
 	read_frequency = config.read_frequency
 	rotate_forward_offset = config.rotate_forward_offset
+	enable = config.lidar_enable
+	
+	if not ser == None:
+		updateRotateForwardOffset() # needs to be before updateHeaderOffset
+		updateHeaderOffset()
+		updateRPM()
+		updateParkOffset()
+		updateReadInterval()
 
 	return config
 	
@@ -255,17 +269,13 @@ def updateRotateForwardOffset():
 
 	
 def readlidar(ser):
-	
-	ser.write("y\n") # get version
-	rospy.sleep(0.1)
-	while ser.inWaiting() > 0:
-		line = ser.readline().strip()
-		line = "firmware: "+line
-		rospy.loginfo(line)
-		
-	ser.write("r"+chr(rpm)+"\n")  
-	ser.write("d"+chr(DIR)+"\n")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
+
+	global lidarrunning
+
+	lidarrunning = True	
+	#  ser.write("r"+chr(rpm)+"\n")  
 	ser.write("a\n") # start lidar
+	rospy.loginfo("SCAN: lidar enabled");
 
 	# clear buffer
 	ser.reset_input_buffer()
@@ -279,7 +289,7 @@ def readlidar(ser):
 	lastcount = 0
 	consecutivescandropped = 0
 	
-	while not rospy.is_shutdown() and ser.is_open:
+	while not rospy.is_shutdown() and ser.is_open and enable:
 
 		# read data and dump into array, checking for header code 0xFF,0xFF,0xFF,0xFF
 		try:
@@ -289,8 +299,11 @@ def readlidar(ser):
 		
 		# if timed out after TIMEOUT seconds, defined in usbdiscover.py)
 		if len(ch) == 0:
-			rospy.logerr("no response from xaxxonlidar device")
-			break
+			if scannum > 1:
+				rospy.logerr("no response from xaxxonlidar device")
+				scannum += 1	
+				break
+			continue
 		
 		raw_data.append(ch)
 		
@@ -340,21 +353,21 @@ def readlidar(ser):
 		scannum += 1	
 
 
-		# debug info
-		if scannum % 10 == 0 and DEBUGOUTPUT:
+		# error monitoring, debug info
+		if DEBUGOUTPUT and scannum % 10 == 0:
 			msg = "SCAN "+str(scannum)+": cycle: "+str(cycle)+", count: "+str(count)
 			rospy.loginfo(msg)
 		
-		if not rospycount == count and DEBUGOUTPUT:
+		if not rospycount == count and scannum > 1 and DEBUGOUTPUT:
 			msg = "SCAN "+str(scannum)+": count/data mismatch: "+ str( rospycount-count )
 			rospy.logerr(msg)
 
 		
-		if abs(count - lastcount) > 2 and scannum > 3 and DEBUGOUTPUT:
+		if abs(count - lastcount) > 2 and scannum > 4 and DEBUGOUTPUT:
 			msg = "SCAN "+str(scannum)+": count change from: "+ str(lastcount)+", to: "+str(count)
 			rospy.logerr(msg)
 			
-		if count<5: #  or scannum > 100: 
+		if count<5 and scannum > 4: 
 			if DEBUGOUTPUT:  
 				msg = "SCAN "+str(scannum)+": low data count: "+str(count)+", cycle: "+str(cycle)
 				msg += ", scan dropped"
@@ -374,7 +387,7 @@ def readlidar(ser):
 
 		lastcount = count
 		
-		if scannum <= 3: # drop 1st few scans while lidar spins up
+		if scannum <= 4: # drop 1st few scans while lidar spins up
 			del raw_data[:]
 			continue
 		
@@ -433,17 +446,34 @@ client = dynamic_reconfigure.client.Client("lidarbroadcast", timeout=30)
 device = usbdiscover
 
 while True:
-	ser = device.usbdiscover("<id::xaxxonopenlidar>")
+	if ser == None and not rospy.is_shutdown(): #connect
+		ser = device.usbdiscover("<id::xaxxonopenlidar>", 5)
+		
+		ser.write("y\n") # get version
+		rospy.sleep(0.1)
+		while ser.inWaiting() > 0:
+			line = ser.readline().strip()
+			line = "firmware: "+line
+			rospy.loginfo(line)
+		ser.write("d"+chr(DIR)+"\n")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
 
-	updateRotateForwardOffset() # needs to be 1st
-	updateHeaderOffset()
-	updateRPM()
-	updateParkOffset()
-	updateReadInterval()
-
-	readlidar(ser)
+	if enable:
+		updateRotateForwardOffset() # needs to be 1st
+		updateHeaderOffset()
+		updateRPM()
+		updateParkOffset()
+		updateReadInterval()
+		
+		readlidar(ser) # blocking
+		
+	if not enable and lidarrunning:
+		ser.write("f\n") # stop lidar
+		lidarrunning = False
+		rospy.loginfo("SCAN: lidar disabled");
 	
 	if rospy.is_shutdown():
 		break
 	else:
 		device.removelockfile()
+		
+	rospy.sleep(0.01)
