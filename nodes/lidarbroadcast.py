@@ -22,9 +22,6 @@ enable = True
 ser = None
 lidarrunning = False
 
-DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
-DEBUGOUTPUT = True
-
 dropScanTurnRateThreshold = 0 # 0 = disabled
 lastodomth = None
 lastodomtime = 0
@@ -37,6 +34,12 @@ read_frequency = 0
 rotate_forward_offset = rotateforwardoffset
 rpm_ = rpm
 
+scan = None
+rebroadcastscan = None
+lastscantime = 0
+BROADCASTLAST = True # continue to broadcast last scan while lidar disabled
+DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
+DEBUGOUTPUT = False
 
 def cleanup():
 	global ser, lidarrunning
@@ -270,7 +273,7 @@ def updateRotateForwardOffset():
 	
 def readlidar(ser):
 
-	global lidarrunning
+	global lidarrunning, scan, lastscantime
 
 	lidarrunning = True	
 	#  ser.write("r"+chr(rpm)+"\n")  
@@ -392,7 +395,10 @@ def readlidar(ser):
 			continue
 		
 		scan = LaserScan()
+		
 		scan.header.stamp = current_time - rospy.Duration(cycle) # rospycycle 
+		lastscantime = current_time.to_sec() - cycle # seconds, floating point (used by rebroadcastscan only)
+		
 		scan.header.frame_id = 'laser_frame'
 
 		scan.angle_min = 0.0
@@ -463,14 +469,25 @@ while True:
 		updateRPM()
 		updateParkOffset()
 		updateReadInterval()
+		rebroadcastscan = None
 		
 		readlidar(ser) # blocking
 		
-	if not enable and lidarrunning:
-		ser.write("f\n") # stop lidar
-		lidarrunning = False
-		rospy.loginfo("SCAN: lidar disabled");
-	
+	else:
+		if lidarrunning:
+			ser.write("f\n") # stop lidar
+			lidarrunning = False
+			rospy.loginfo("SCAN: lidar disabled");
+			rebroadcastscan = scan	
+		elif rebroadcastscan and BROADCASTLAST:
+			#  scan.header.stamp = current_time - rospy.Duration(cycle) # rospycycle 
+			cycle = 1/(rpm/60.0)
+			if lastscantime <= (rospy.get_time() - cycle*2):
+				lastscantime += cycle
+				rebroadcastscan.header.stamp = rospy.Time.from_sec(lastscantime)
+				scan_pub.publish(rebroadcastscan)
+			
+			
 	if rospy.is_shutdown():
 		break
 	else:
