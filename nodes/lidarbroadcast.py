@@ -15,6 +15,7 @@ minimum_range = 0.0 # set by cfg
 maximum_range = 40.0 # set by cfg 
 readInterval = 0.0014 # must match firmware TODO: read from device on init
 rpm = 180 # rev speed, set by cfg, 250 max
+nominalcycle = 1/(rpm/60.0)
 dropscan_degpersec = 0
 parkoffset = 0 # used only by device firmware, set by cfg
 rotateforwardoffset = 0
@@ -39,7 +40,7 @@ rebroadcastscan = None
 lastscantime = 0
 BROADCASTLAST = True # continue to broadcast last scan while lidar disabled
 DIR = 1 # motor direction (1=CW/RHR+ with motor @ bottom, 0=CCW, ROS default)
-DEBUGOUTPUT = False
+DEBUGOUTPUT = True
 
 def cleanup():
 	global ser, lidarrunning
@@ -158,8 +159,8 @@ def updateHeaderOffset():
 def updateMasks(string):
 	global masks
 	
-	if DEBUGOUTPUT:
-		print("updating masks: "+string)
+	#  if DEBUGOUTPUT:
+		#  print("updating masks: "+string)
 
 	masks = []
 	
@@ -178,12 +179,13 @@ def updateMasks(string):
 
 
 def updateRPM():
-	global rpm
+	global rpm, nominalcycle
 
 	if rpm == rpm_:
 		return
 		
 	rpm = rpm_
+	nominalcycle = 1/(rpm/60.0)
 	
 	if DEBUGOUTPUT:
 		print("sending rpm to device: "+str(rpm))
@@ -273,7 +275,7 @@ def updateRotateForwardOffset():
 	
 def readlidar(ser):
 
-	global lidarrunning, scan, lastscantime
+	global lidarrunning, scan, lastscantime, rebroadcastscan
 
 	lidarrunning = True	
 	#  ser.write("r"+chr(rpm)+"\n")  
@@ -312,6 +314,9 @@ def readlidar(ser):
 		
 		if turning:
 			dropscan = True
+			
+		if rebroadcastscan and BROADCASTLAST:
+			rebroadcast()
 				
 		if not ord(ch) == 0xFF:
 			continue
@@ -370,12 +375,17 @@ def readlidar(ser):
 			msg = "SCAN "+str(scannum)+": count change from: "+ str(lastcount)+", to: "+str(count)
 			rospy.logerr(msg)
 			
+		lastcount = count
+
 		if count<5 and scannum > 4: 
 			if DEBUGOUTPUT:  
 				msg = "SCAN "+str(scannum)+": low data count: "+str(count)+", cycle: "+str(cycle)
 				msg += ", scan dropped"
 				rospy.logerr(msg)
 			del raw_data[:]
+			ser.write("n\n0\n") # stop broadcast, lidar disable
+			rospy.sleep(0.1)
+			ser.write("1\nb\n") # lidar enble, start broadcast
 			consecutivescandropped += 1
 			if consecutivescandropped > 3:
 				rospy.logerr("resetting device")
@@ -387,12 +397,12 @@ def readlidar(ser):
 			consecutivescandropped = 0
 
 		
-
-		lastcount = count
-		
 		if scannum <= 4: # drop 1st few scans while lidar spins up
 			del raw_data[:]
 			continue
+			
+			
+		rebroadcastscan = None
 		
 		scan = LaserScan()
 		
@@ -438,6 +448,13 @@ def readlidar(ser):
 		
 		del raw_data[:] 
 
+def rebroadcast():
+	global lastscantime, rebroadcastscan
+	
+	if lastscantime <= (rospy.get_time() - nominalcycle*2):
+		lastscantime += nominalcycle
+		rebroadcastscan.header.stamp = rospy.Time.from_sec(lastscantime)
+		scan_pub.publish(rebroadcastscan)
 
 
 # main
@@ -469,7 +486,7 @@ while True:
 		updateRPM()
 		updateParkOffset()
 		updateReadInterval()
-		rebroadcastscan = None
+		#  rebroadcastscan = None
 		
 		readlidar(ser) # blocking
 		
@@ -480,17 +497,13 @@ while True:
 			rospy.loginfo("SCAN: lidar disabled");
 			rebroadcastscan = scan	
 		elif rebroadcastscan and BROADCASTLAST:
-			#  scan.header.stamp = current_time - rospy.Duration(cycle) # rospycycle 
-			cycle = 1/(rpm/60.0)
-			if lastscantime <= (rospy.get_time() - cycle*2):
-				lastscantime += cycle
-				rebroadcastscan.header.stamp = rospy.Time.from_sec(lastscantime)
-				scan_pub.publish(rebroadcastscan)
+			rebroadcast()
 			
-			
+		
 	if rospy.is_shutdown():
 		break
 	else:
 		device.removelockfile()
 		
 	rospy.sleep(0.01)
+
