@@ -409,7 +409,7 @@ def readlidar(ser):
 		scan.header.stamp = current_time - rospy.Duration(cycle) # rospycycle 
 		lastscantime = current_time.to_sec() - cycle # seconds, floating point (used by rebroadcastscan only)
 		
-		scan.header.frame_id = 'laser_frame'
+		scan.header.frame_id = frameID
 
 		scan.angle_min = 0.0
 		rpmcycle = cycle
@@ -463,6 +463,7 @@ rospy.init_node('lidarbroadcast', anonymous=False)
 rospy.on_shutdown(cleanup)
 scan_pub = rospy.Publisher(rospy.get_param('~scan_topic', 'scan'), LaserScan, queue_size=3)
 rospy.Subscriber("odom", Odometry, odomCallback) # TODO: make optional?
+frameID = rospy.get_param('~frame_id', 'laser_frame')
 
 Server(XaxxonOpenLidarConfig, dynamicConfigCallback)
 client = dynamic_reconfigure.client.Client("lidarbroadcast", timeout=30)
