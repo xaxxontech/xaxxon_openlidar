@@ -361,40 +361,46 @@ def readlidar(ser):
 		scannum += 1	
 
 
-		# error monitoring, debug info
+		""" error monitoring, debug info """
+		
+		# output info every 10 scans
 		if DEBUGOUTPUT and scannum % 10 == 0:
 			msg = "SCAN "+str(scannum)+": cycle: "+str(cycle)+", count: "+str(count)
 			rospy.loginfo(msg)
 		
+		# warn if firmware sample count doesn't match 
 		if not rospycount == count and scannum > 1 and DEBUGOUTPUT:
 			msg = "SCAN "+str(scannum)+": count/data mismatch: "+ str( rospycount-count )
-			rospy.logerr(msg)
+			rospy.logwarn(msg)
 
-		
+		# warn if sample count change
 		if abs(count - lastcount) > 2 and scannum > 4 and DEBUGOUTPUT:
 			msg = "SCAN "+str(scannum)+": count change from: "+ str(lastcount)+", to: "+str(count)
-			rospy.logerr(msg)
-			
+			rospy.logwarn(msg)
 		lastcount = count
 
-		if count<5 and scannum > 4: 
+		# reset device if low sample count
+		if count<(nominalcycle/readInterval/2) and scannum > 4: 
 			if DEBUGOUTPUT:  
 				msg = "SCAN "+str(scannum)+": low data count: "+str(count)+", cycle: "+str(cycle)
 				msg += ", scan dropped"
 				rospy.logerr(msg)
+
+			if consecutivescandropped > 3:
+				rospy.logerr("resetting device")
+				cleanup()
+				break  
+
 			del raw_data[:]
 			ser.write("n\n0\n") # stop broadcast, lidar disable
 			rospy.sleep(0.1)
 			ser.write("1\nb\n") # lidar enble, start broadcast
 			consecutivescandropped += 1
-			if consecutivescandropped > 3:
-				rospy.logerr("resetting device")
-				cleanup()
-				break  # TODO: experimental
-			
 			continue
+
 		else:
 			consecutivescandropped = 0
+
 
 		
 		if scannum <= 4: # drop 1st few scans while lidar spins up
