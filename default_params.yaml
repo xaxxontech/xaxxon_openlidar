@@ -1,0 +1,20 @@
+lidarbroadcast:
+  ros__parameters:
+    dropscan_turnrate: 0
+    forward_offset: 189.0
+    frame_id: laser_frame
+    lidar_enable: true
+    masks: !!python/object/apply:array.array
+    - d
+    - - 80.0
+      - 97.0
+      - 263.0
+      - 280.0
+    maximum_range: 40.0
+    minimum_range: 0.5
+    park_offset: 180.0
+    read_frequency: 715.0
+    rotate_forward_offset: 0.0
+    rpm: 180
+    scan_topic: scan
+    use_sim_time: false
