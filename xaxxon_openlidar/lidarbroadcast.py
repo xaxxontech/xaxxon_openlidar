@@ -641,10 +641,9 @@ def main(args=None):
 				line = ser.readline().decode("utf-8").strip()
 				line = "firmware: "+line
 				node.get_logger().info(line)
-			# ser.write(("d"+chr(DIR)+"\n").encode())  # set direction (1=CW RHR+ motor@bottom default, ROS default)
-			ser.write(b"d")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
-			ser.write(DIR)
-			ser.write(b"\n")
+
+			# set direction (1=CW RHR+ motor@bottom default, ROS default)
+			ser.write(bytearray([ord("d"), DIR, ord("\n")]))
 
 		if lidar_enable:
 			updateRotateForwardOffset() # needs to be 1st
