@@ -16,11 +16,11 @@ atexit.register(removelockfile)
 
 def checkBoardId(idstring, ser):
 	ser.reset_input_buffer()
-	ser.write("x\n") # check board id
+	ser.write(b"x\n") # check board id
 	line = ""
 	time.sleep(0.1)
 	while ser.inWaiting() > 0:
-		line = ser.readline().strip()
+		line = (ser.readline()).decode("utf-8").strip()
 
 	if not line == idstring:
 		print("incorrect board id: "+line)
@@ -28,8 +28,8 @@ def checkBoardId(idstring, ser):
 	
 	print("connected to: "+line)
 	return True
-	
-	
+
+
 def usbdiscover(idstring, TIMEOUT):
 	global lockfilepath, portnum
 

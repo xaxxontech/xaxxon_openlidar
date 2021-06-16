@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import rospy, tf
 import serial, math
@@ -45,18 +45,18 @@ DEBUGOUTPUT = True
 def cleanup():
 	global ser, lidarrunning
 	
-	ser.write("f\n") # stop lidar
+	ser.write(b"f\n") # stop lidar
 	lidarrunning = False
 	
 	if DEBUGOUTPUT:
 		rospy.sleep(0.5)
 		ser.reset_input_buffer()
-		ser.write("z\n") # get i2c_error count
+		ser.write(b"z\n") # get i2c_error count
 		rospy.sleep(0.1)
 		while ser.inWaiting() > 0:
-			line = "SCAN: "+ser.readline().strip()
+			line = "SCAN: "+ser.readline().decode("utf-8").strip()
 			rospy.loginfo(line)
-		
+	
 	ser.close()
 	ser = None
 	rospy.loginfo("SCAN: lidar disabled, shutdown");
@@ -137,30 +137,11 @@ def updateHeaderOffset():
 		print("sending new headeroffset to device: "+str(n))
 	val1 = n & 0xFF
 	val2 = (n >>8) & 0xFF
-	ser.write("k")
-	ser.write(chr(val1))
-	ser.write(chr(val2))
-	ser.write("\n")
-
-# def getHeaderOffset():
-	# global headeroffset
-	
-	# ser.write("i\n") # get header offset
-	# rospy.sleep(0.1)
-	# while ser.inWaiting() > 0:
-		# line = ser.readline().strip()
-		# print(line)
-		# headeroffset = float(line.replace("<","").replace(">",""))*360.0
-		# print("headeroffset received from device: "+str(headeroffset))
-		
-	# client.update_configuration({"header_offset":headeroffset})
+	ser.write(bytearray([ord("k"), val1, val2, ord("\n")]))
 
 
 def updateMasks(string):
 	global masks
-	
-	#  if DEBUGOUTPUT:
-		#  print("updating masks: "+string)
 
 	masks = []
 	
@@ -189,8 +170,9 @@ def updateRPM():
 	
 	if DEBUGOUTPUT:
 		print("sending rpm to device: "+str(rpm))
-		
-	ser.write("r"+chr(rpm)+"\n")  
+
+	ser.write(bytearray([ord("r"), rpm, ord("\n")]))
+
 	
 	
 def updateParkOffset():
@@ -207,12 +189,9 @@ def updateParkOffset():
 		
 	val1 = n & 0xFF
 	val2 = (n >>8) & 0xFF
-	ser.write("q")
-	ser.write(chr(val1))
-	ser.write(chr(val2))
-	ser.write("\n")
-	
-	
+	ser.write(bytearray([ord("q"), val1, val2, ord("\n")]))
+
+
 def updateReadInterval():
 	global readInterval
 	
@@ -227,10 +206,7 @@ def updateReadInterval():
 	
 	val1 = interval & 0xFF
 	val2 = (interval >>8) & 0xFF
-	ser.write("t")
-	ser.write(chr(val1))
-	ser.write(chr(val2))
-	ser.write("\n")
+	ser.write(bytearray([ord("t"), val1, val2, ord("\n")]))
 
 
 def updateRotateForwardOffset():
@@ -279,7 +255,7 @@ def readlidar(ser):
 
 	lidarrunning = True	
 	#  ser.write("r"+chr(rpm)+"\n")  
-	ser.write("a\n") # start lidar
+	ser.write(b"a\n") # start lidar
 	rospy.loginfo("SCAN: lidar enabled");
 
 	# clear buffer
@@ -336,7 +312,7 @@ def readlidar(ser):
 					if not ord(ch) == 0xFF:
 						continue
 
-		ser.write("h\n") # send host hearbeat (every <10 sec minimum)
+		ser.write(b"h\n") # send host hearbeat (every <10 sec minimum)
 
 		# read count		
 		low = ord(ser.read(1))
@@ -392,9 +368,9 @@ def readlidar(ser):
 				break  
 
 			del raw_data[:]
-			ser.write("n\n0\n") # stop broadcast, lidar disable
+			ser.write(b"n\n0\n") # stop broadcast, lidar disable
 			rospy.sleep(0.1)
-			ser.write("1\nb\n") # lidar enble, start broadcast
+			ser.write(b"1\nb\n") # lidar enble, start broadcast
 			consecutivescandropped += 1
 			continue
 
@@ -402,12 +378,11 @@ def readlidar(ser):
 			consecutivescandropped = 0
 
 
-		
 		if scannum <= 4: # drop 1st few scans while lidar spins up
 			del raw_data[:]
 			continue
-			
-			
+ 
+ 
 		rebroadcastscan = None
 		
 		scan = LaserScan()
@@ -479,14 +454,20 @@ while True:
 	if ser == None and not rospy.is_shutdown(): #connect
 		ser = device.usbdiscover("<id::xaxxonopenlidar>", 5)
 		
-		ser.write("y\n") # get version
+		ser.write(b"y\n") # get version
 		rospy.sleep(0.1)
+		
 		while ser.inWaiting() > 0:
-			line = ser.readline().strip()
+			line = ser.readline().decode("utf-8").strip()
 			line = "firmware: "+line
 			rospy.loginfo(line)
-		ser.write("d"+chr(DIR)+"\n")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
-
+		
+		#  ser.write(b"d")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
+		#  ser.write(DIR)
+		#  ser.write(b"\n")
+		
+		ser.write(bytearray([ord("d"), DIR, ord("\n")]))
+		
 	if enable:
 		updateRotateForwardOffset() # needs to be 1st
 		updateHeaderOffset()
@@ -499,7 +480,7 @@ while True:
 		
 	else:
 		if lidarrunning:
-			ser.write("f\n") # stop lidar
+			ser.write(b"f\n") # stop lidar
 			lidarrunning = False
 			rospy.loginfo("SCAN: lidar disabled");
 			rebroadcastscan = scan	
