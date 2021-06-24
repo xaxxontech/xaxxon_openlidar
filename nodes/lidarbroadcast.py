@@ -462,10 +462,7 @@ while True:
 			line = "firmware: "+line
 			rospy.loginfo(line)
 		
-		#  ser.write(b"d")  # set direction (1=CW RHR+ motor@bottom default, ROS default)
-		#  ser.write(DIR)
-		#  ser.write(b"\n")
-		
+		# set direction (1=CW RHR+ motor@bottom default, ROS default)
 		ser.write(bytearray([ord("d"), DIR, ord("\n")]))
 		
 	if enable:
