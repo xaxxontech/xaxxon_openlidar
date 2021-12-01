@@ -22,7 +22,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-        'broadcast = xaxxon_openlidar.lidarbroadcast:main',
+        'lidarbroadcast = xaxxon_openlidar.lidarbroadcast:main',
         ],
     },
 )

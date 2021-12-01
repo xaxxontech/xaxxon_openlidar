@@ -1,11 +1,11 @@
 import serial, os, time, atexit
 
 lockfilepath = None
-portnum = 0
-
+DISCOVEREDPORTFILEPREFIX="/tmp/usbdiscoveredportnum-"
+LOCKFILEPREFIX="/tmp/dev_ttyUSB"
 
 def removelockfiles():
-	os.system("rm -f /tmp/dev_ttyUSB*")
+	os.system("rm -f "+LOCKFILEPREFIX+"*")
 	
 def removelockfile():
 	if os.path.exists(lockfilepath):
@@ -31,14 +31,23 @@ def checkBoardId(idstring, ser):
 
 
 def usbdiscover(idstring, TIMEOUT):
-	global lockfilepath, portnum
+	global lockfilepath
+	
+	portnums = [0,1,2,3,4,5,6]
+	
+	# check previous discovered ports 1st, reorder 
+	for portnum in portnums:
+		if os.path.exists(DISCOVEREDPORTFILEPREFIX+str(portnum)):
+			portnums.pop(portnum)
+			portnums.insert(0,portnum)
+			break
 
-	while portnum <= 6:
+	for portnum in portnums:
 		port = '/dev/ttyUSB'+str(portnum)
 
 		print("trying port: "+port)
 		
-		lockfilepath = "/tmp/dev_ttyUSB"+str(portnum)
+		lockfilepath = LOCKFILEPREFIX+str(portnum)
 		tries = 0
 		while tries < 5:
 			if os.path.exists(lockfilepath):
@@ -66,18 +75,19 @@ def usbdiscover(idstring, TIMEOUT):
 			
 		time.sleep(2)
 
-		if checkBoardId(idstring, ser):
+		if checkBoardId(idstring, ser): # found
 			break
 			
 		ser.close()
 		if os.path.exists(lockfilepath):
 			os.remove(lockfilepath)
 		time.sleep(1)
-		portnum += 1
+		# portnum += 1
 		
 	if not ser.is_open:
 		print("device not found")
 		sys.exit(0)
 	
+	open(DISCOVEREDPORTFILEPREFIX+str(portnum), 'w') # creates persistent discovered port number file
 	return ser
 

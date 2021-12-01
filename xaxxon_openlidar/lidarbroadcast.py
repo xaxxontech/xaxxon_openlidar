@@ -7,12 +7,11 @@ from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from rcl_interfaces.msg import ParameterEvent
 
-# import signal, sys
 
 #parameter defaults
 rpm=180
 minimum_range = 0.5
-maximum_range = 40.0 
+maximum_range = 20.0 
 masks = [80.0, 97.0, 263.0, 280.0]
 dropscan_turnrate = 0 # threshold, degrees, 0 = disabled
 park_offset = 180.0 # used only by device firmware
@@ -60,6 +59,8 @@ def cleanup():
 	ser.write(b"f\n") # stop lidar
 	lidarrunning = False
 	
+	device.removelockfile()
+	
 	if DEBUGOUTPUT:
 		print("cleanup")
 		time.sleep(0.5)
@@ -73,7 +74,6 @@ def cleanup():
 	ser.close()
 	ser = None
 	node.get_logger().info("SCAN: lidar disabled, shutdown");
-	rclpy.shutdown()
 
 	
 def odomCallback(data):
@@ -109,142 +109,75 @@ def declareParams():
 	global minimum_range, maximum_range, rpm, masks, dropscan_turnrate, park_offset
 	global forward_offset, read_frequency, rotate_forward_offset, lidar_enable, frame_id, scan_topic
 	
-	node.declare_parameter("minimum_range")
-	node.declare_parameter("maximum_range")
-	node.declare_parameter("rpm")
-	node.declare_parameter("masks")
-	node.declare_parameter("dropscan_turnrate")
-	node.declare_parameter("park_offset")
-	node.declare_parameter("forward_offset")
-	node.declare_parameter("read_frequency")
-	node.declare_parameter("rotate_forward_offset")
-	node.declare_parameter("lidar_enable")
-	node.declare_parameter("frame_id")
-	node.declare_parameter("scan_topic")
+	node.declare_parameter("minimum_range", rclpy.Parameter.Type.DOUBLE)
+	node.declare_parameter("maximum_range", rclpy.Parameter.Type.DOUBLE)
+	node.declare_parameter("rpm", rclpy.Parameter.Type.INTEGER)
+	node.declare_parameter("masks", rclpy.Parameter.Type.DOUBLE_ARRAY)
+	node.declare_parameter("dropscan_turnrate", rclpy.Parameter.Type.INTEGER)
+	node.declare_parameter("park_offset", rclpy.Parameter.Type.DOUBLE)
+	node.declare_parameter("forward_offset", rclpy.Parameter.Type.DOUBLE)
+	node.declare_parameter("read_frequency", rclpy.Parameter.Type.DOUBLE)
+	node.declare_parameter("rotate_forward_offset", rclpy.Parameter.Type.DOUBLE)
+	node.declare_parameter("lidar_enable", rclpy.Parameter.Type.BOOL)
+	node.declare_parameter("frame_id", rclpy.Parameter.Type.STRING)
+	node.declare_parameter("scan_topic", rclpy.Parameter.Type.STRING)
 
-	# if not node.get_parameter("minimum_range").type_.value == 0:
-	if not str(node.get_parameter("minimum_range").type_) == "Type.NOT_SET":
-		minimum_range = node.get_parameter("minimum_range").get_parameter_value().double_value
-		print("setting minimum_range: "+str(minimum_range))
+	try: 
+		if not str(node.get_parameter("minimum_range").type_) == "Type.NOT_SET":
+			minimum_range = node.get_parameter("minimum_range").get_parameter_value().double_value
+			print("setting minimum_range: "+str(minimum_range))
+			
+		if not str(node.get_parameter("maximum_range").type_) == "Type.NOT_SET":
+			maximum_range = node.get_parameter("maximum_range").get_parameter_value().double_value
+			print("setting maximum_range: "+str(maximum_range))
 		
-	if not str(node.get_parameter("maximum_range").type_) == "Type.NOT_SET":
-		maximum_range = node.get_parameter("maximum_range").get_parameter_value().double_value
-		print("setting maximum_range: "+str(maximum_range))
-	
-	if not str(node.get_parameter("rpm").type_) == "Type.NOT_SET":
-		rpm = node.get_parameter("rpm").get_parameter_value().integer_value
-		print("setting rpm: "+str(rpm))
-		
-	if not str(node.get_parameter("masks").type_) == "Type.NOT_SET":
-		masks = node.get_parameter("masks").get_parameter_value().double_array_value
-		print("setting masks: "+str(masks))
+		if not str(node.get_parameter("rpm").type_) == "Type.NOT_SET":
+			rpm = node.get_parameter("rpm").get_parameter_value().integer_value
+			print("setting rpm: "+str(rpm))
+			
+		if not str(node.get_parameter("masks").type_) == "Type.NOT_SET":
+			masks = node.get_parameter("masks").get_parameter_value().double_array_value
+			print("setting masks: "+str(masks))
 
-	if not str(node.get_parameter("dropscan_turnrate").type_) == "Type.NOT_SET":
-		dropscan_turnrate = node.get_parameter("dropscan_turnrate").get_parameter_value().integer_value
-		print("setting dropscan_turnrate: "+str(dropscan_turnrate))
+		if not str(node.get_parameter("dropscan_turnrate").type_) == "Type.NOT_SET":
+			dropscan_turnrate = node.get_parameter("dropscan_turnrate").get_parameter_value().integer_value
+			print("setting dropscan_turnrate: "+str(dropscan_turnrate))
+			
+		if not str(node.get_parameter("park_offset").type_) == "Type.NOT_SET":
+			park_offset = node.get_parameter("park_offset").get_parameter_value().double_value
+			print("setting park_offset: "+str(park_offset))
+			
+		if not str(node.get_parameter("forward_offset").type_) == "Type.NOT_SET":
+			forward_offset = node.get_parameter("forward_offset").get_parameter_value().double_value
+			print("setting forward_offset: "+str(forward_offset))		
+			
+		if not str(node.get_parameter("read_frequency").type_) == "Type.NOT_SET":
+			read_frequency = node.get_parameter("read_frequency").get_parameter_value().double_value
+			print("setting read_frequency: "+str(read_frequency))
+			
+		if not str(node.get_parameter("rotate_forward_offset").type_) == "Type.NOT_SET":
+			rotate_forward_offset = node.get_parameter("rotate_forward_offset").get_parameter_value().double_value
+			print("setting rotate_forward_offset: "+str(rotate_forward_offset))
+			
+		if not str(node.get_parameter("lidar_enable").type_) == "Type.NOT_SET":
+			lidar_enable = node.get_parameter("lidar_enable").get_parameter_value().bool_value
+			print("setting lidar_enable: "+str(lidar_enable))			
+			
+		if not str(node.get_parameter("frame_id").type_) == "Type.NOT_SET":
+			frame_id = node.get_parameter("frame_id").get_parameter_value().string_value
+			print("setting frame_id: "+str(frame_id))
+			
+		if not str(node.get_parameter("scan_topic").type_) == "Type.NOT_SET":
+			scan_topic = node.get_parameter("scan_topic").get_parameter_value().string_value
+			print("setting scan_topic: "+str(scan_topic))	
+			
+	except rclpy.exceptions.ParameterUninitializedException: # params yaml file not available/specified
+		pass
 		
-	if not str(node.get_parameter("park_offset").type_) == "Type.NOT_SET":
-		park_offset = node.get_parameter("park_offset").get_parameter_value().double_value
-		print("setting park_offset: "+str(park_offset))
-		
-	if not str(node.get_parameter("forward_offset").type_) == "Type.NOT_SET":
-		forward_offset = node.get_parameter("forward_offset").get_parameter_value().double_value
-		print("setting forward_offset: "+str(forward_offset))		
-		
-	if not str(node.get_parameter("read_frequency").type_) == "Type.NOT_SET":
-		read_frequency = node.get_parameter("read_frequency").get_parameter_value().double_value
-		print("setting read_frequency: "+str(read_frequency))
-		
-	if not str(node.get_parameter("rotate_forward_offset").type_) == "Type.NOT_SET":
-		rotate_forward_offset = node.get_parameter("rotate_forward_offset").get_parameter_value().double_value
-		print("setting rotate_forward_offset: "+str(rotate_forward_offset))
-		
-	if not str(node.get_parameter("lidar_enable").type_) == "Type.NOT_SET":
-		lidar_enable = node.get_parameter("lidar_enable").get_parameter_value().bool_value
-		print("setting lidar_enable: "+str(lidar_enable))			
-		
-	if not str(node.get_parameter("frame_id").type_) == "Type.NOT_SET":
-		frame_id = node.get_parameter("frame_id").get_parameter_value().string_value
-		print("setting frame_id: "+str(frame_id))
-		
-	if not str(node.get_parameter("scan_topic").type_) == "Type.NOT_SET":
-		scan_topic = node.get_parameter("scan_topic").get_parameter_value().string_value
-		print("setting scan_topic: "+str(scan_topic))	
-					
-	"""
-	all_new_parameters = [
-		rclpy.parameter.Parameter(
-			"minimum_range",
-			rclpy.Parameter.Type.DOUBLE,
-			minimum_range
-		),
-		rclpy.parameter.Parameter(
-			"maximum_range",
-			rclpy.Parameter.Type.DOUBLE,
-			maximum_range
-		),
-		rclpy.parameter.Parameter(
-			"rpm",
-			rclpy.Parameter.Type.INTEGER,
-			rpm
-		),
-		rclpy.parameter.Parameter(
-			"masks",
-			rclpy.Parameter.Type.DOUBLE_ARRAY,
-			masks
-		),
-		rclpy.parameter.Parameter(
-			"dropscan_turnrate",
-			rclpy.Parameter.Type.INTEGER,
-			dropscan_turnrate
-		),
-		rclpy.parameter.Parameter(
-			"park_offset",
-			rclpy.Parameter.Type.DOUBLE,
-			park_offset
-		),
-			rclpy.parameter.Parameter(
-			"forward_offset",
-			rclpy.Parameter.Type.DOUBLE,
-			forward_offset
-		),
-		rclpy.parameter.Parameter(
-			"read_frequency",
-			rclpy.Parameter.Type.DOUBLE,
-			read_frequency
-		),
-		rclpy.parameter.Parameter(
-			"rotate_forward_offset",
-			rclpy.Parameter.Type.DOUBLE,
-			rotate_forward_offset
-		),
-		rclpy.parameter.Parameter(
-			"lidar_enable",
-			rclpy.Parameter.Type.BOOL,
-			lidar_enable
-		),
-		rclpy.parameter.Parameter(
-			"frame_id",
-			rclpy.Parameter.Type.STRING,
-			frame_id
-		),
-		rclpy.parameter.Parameter(
-			"scan_topic",
-			rclpy.Parameter.Type.STRING,
-			scan_topic
-		)
-	]
-
-	node.set_parameters(all_new_parameters)
-	"""
-
 
 def parameterscallback(msg):
 	global minimum_range, maximum_range, rpm, masks, dropscan_turnrate, park_offset
 	global forward_offset, read_frequency, rotate_forward_offset, lidar_enable, frame_id, scan_topic
-
-	print("param event happened")
-	print(msg)
 
 	if msg.node=="/lidarbroadcast":
 		params = msg.new_parameters + msg.changed_parameters
@@ -444,13 +377,14 @@ def readlidar(ser):
 	lastcount = 0
 	consecutivescandropped = 0
 	
-	while ser.is_open and lidar_enable and rclpy.ok():
+	while ser.is_open and lidar_enable and not shuttingdown:
 
 		# read data and dump into array, checking for header code 0xFF,0xFF,0xFF,0xFF
 		try:
 			ch = ser.read(1)  
 		except KeyboardInterrupt: # ctrl-c pressed
 			cleanup()
+			break
 		
 		# if timed out after TIMEOUT seconds, defined in usbdiscover.py)
 		if len(ch) == 0:
@@ -514,7 +448,7 @@ def readlidar(ser):
 		""" error monitoring, debug info """
 		
 		# output info every 10 scans
-		if DEBUGOUTPUT and scannum % 10 == 0:
+		if DEBUGOUTPUT and scannum % 10 == 0 or scannum < 10:
 			msg = "SCAN "+str(scannum)+": cycle: "+str(cycle)+", count: "+str(count)
 			node.get_logger().info(msg)
 		
@@ -543,7 +477,7 @@ def readlidar(ser):
 
 			del raw_data[:]
 			ser.write(b"n\n0\n") # stop broadcast, lidar disable
-			rclpy.sleep(0.1)
+			time.sleep(0.1)
 			ser.write(b"1\nb\n") # lidar enble, start broadcast
 			consecutivescandropped += 1
 			continue
@@ -631,7 +565,7 @@ def main(args=None):
 
 	# rospy.Subscriber("odom", Odometry, odomCallback) # TODO: make optional?
 
-	while True:
+	while not shuttingdown:
 		if ser == None: # and rclpy.ok(): #connect
 			ser = device.usbdiscover("<id::xaxxonopenlidar>", 5)
 			
@@ -662,12 +596,11 @@ def main(args=None):
 			elif rebroadcastscan and BROADCASTLAST:
 				rebroadcast()
 			
-		if not rclpy.ok():
+		try:	
+			rclpy.spin_once(node, timeout_sec=0.01)
+		except KeyboardInterrupt: 
+			cleanup() 
 			break
-		else:
-			device.removelockfile()
-			
-		rclpy.spin_once(node, timeout_sec=0.01)
 
 
 if __name__ == '__main__':

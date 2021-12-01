@@ -4,12 +4,7 @@ lidarbroadcast:
     forward_offset: 189.0
     frame_id: laser_frame
     lidar_enable: true
-    masks: !!python/object/apply:array.array
-    - d
-    - - 80.0
-      - 97.0
-      - 263.0
-      - 280.0
+    masks: [ 80.0, 97.0, 263.0, 280.0 ]
     maximum_range: 40.0
     minimum_range: 0.5
     park_offset: 180.0
